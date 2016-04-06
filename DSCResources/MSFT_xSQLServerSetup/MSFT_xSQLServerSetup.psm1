@@ -16,9 +16,8 @@ function Get-TargetResource
         [System.String]
         $SourceFolder = "Source",
 
-        [parameter(Mandatory = $true)]
         [System.Management.Automation.PSCredential]
-        $SetupCredential,
+        $SetupCredential = $null,
 
         [System.Management.Automation.PSCredential]
         $SourceCredential,
@@ -381,9 +380,8 @@ function Set-TargetResource
         [System.String]
         $SourceFolder = "Source",
 
-        [parameter(Mandatory = $true)]
         [System.Management.Automation.PSCredential]
-        $SetupCredential,
+        $SetupCredential = $null,
 
         [System.Management.Automation.PSCredential]
         $SourceCredential,
@@ -444,7 +442,7 @@ function Set-TargetResource
         $SecurityMode,
 
         [System.Management.Automation.PSCredential]
-        $SAPwd,
+        $SAPwd = $null,
 
         [System.String]
         $InstallSQLDataDir,
@@ -539,16 +537,16 @@ function Set-TargetResource
     $ISServiceName = "MsDtsServer" + $SQLVersion + "0"
 
     # Determine features to install
-    $FeaturesToInstall = ""
+    $FeaturesToInstall = @()
     foreach($Feature in $Features.Split(","))
     {
-        if(!($SQLData.Features.Contains($Feature)))
+        if(!($SQLData.Features -contains $Feature))
         {
-            $FeaturesToInstall += "$Feature,"
+            $FeaturesToInstall += $Feature
         }
     }
-    $Features = $FeaturesToInstall.Trim(",")
-
+    $Features = [string]::Join(",", $FeaturesToInstall);
+    
     # If SQL shared components already installed, clear InstallShared*Dir variables
     switch($SQLVersion)
     {
@@ -617,7 +615,7 @@ function Set-TargetResource
         $ArgumentVars += "BrowserSvcStartupType"
     }
 
-    if($Features.Contains("SQLENGINE"))
+    if($FeaturesToInstall -contains "SQLENGINE")
     {
         $ArgumentVars += @(
             "SecurityMode",
@@ -656,7 +654,7 @@ function Set-TargetResource
         }
         $Arguments += " /AGTSVCSTARTUPTYPE=Automatic"
     }
-    if($Features.Contains("FULLTEXT"))
+    if($FeaturesToInstall -contains "FULLTEXT")
     {
         if($PSBoundParameters.ContainsKey("FTSvcAccount"))
         {
@@ -671,7 +669,7 @@ function Set-TargetResource
             }
         }
     }
-    if($Features.Contains("RS"))
+    if($FeaturesToInstall -contains "RS")
     {
         if($PSBoundParameters.ContainsKey("RSSvcAccount"))
         {
@@ -687,7 +685,7 @@ function Set-TargetResource
         }
     }
 
-    if($Features.Contains("AS"))
+    if($FeaturesToInstall -contains "AS")
     {
         $ArgumentVars += @(
             "ASCollation",
@@ -710,7 +708,7 @@ function Set-TargetResource
             }
         }
     }
-    if($Features.Contains("IS"))
+    if($FeaturesToInstall -contains "IS")
     {
         if($PSBoundParameters.ContainsKey("ISSvcAccount"))
         {
@@ -732,26 +730,55 @@ function Set-TargetResource
             $Arguments += " /$ArgumentVar=`"" + (Get-Variable -Name $ArgumentVar).Value + "`""
         }
     }
-    if($Features.Contains("SQLENGINE"))
+    if($FeaturesToInstall -contains "SQLENGINE")
     {
-        $Arguments += " /SQLSysAdminAccounts=`"" + $SetupCredential.UserName + "`""
+        $addedAccountsArg = $false;
+        if($SetupCredential -ne $null) 
+        {
+            $Arguments += " /SQLSysAdminAccounts= `"$($SetupCredential.UserName)`""
+            $addedAccountsArg = $true;
+        }
+
         if($PSBoundParameters.ContainsKey("SQLSysAdminAccounts"))
         {
+            if(-not $addedAccountsArg)
+            {
+                $Arguments += " /SQLSysAdminAccounts="
+                $addedAccountsArg = $true;
+            }
+
             foreach($AdminAccount in $SQLSysAdminAccounts)
             {
                 $Arguments += " `"$AdminAccount`""
             }
         }
-        if($SecurityMode -eq "SQL")
+        if($SecurityMode -eq "SQL" -and $SAPwd -ne $null)
         {
             $Arguments += " /SAPwd=" + $SAPwd.GetNetworkCredential().Password
         }
     }
-    if($Features.Contains("AS"))
+    if($FeaturesToInstall -contains "AS")
     {
-        $Arguments += " /ASSysAdminAccounts=`"" + $SetupCredential.UserName + "`""
+        $addedAccountsArg = $false;
+        if($SetupCredential -ne $null) 
+        {
+            $Arguments += " /ASSysAdminAccounts= `"$($SetupCredential.UserName)`""
+            $addedAccountsArg = $true;
+        }
+
+        if($SetupCredential -ne $null)
+        {        
+            $Arguments += $SetupCredential.UserName + "`""
+        }
+
         if($PSBoundParameters.ContainsKey("ASSysAdminAccounts"))
         {
+            if(-not $addedAccountsArg)
+            {
+                $Arguments += " /ASSysAdminAccounts="
+                $addedAccountsArg = $true;
+            }
+
             foreach($AdminAccount in $ASSysAdminAccounts)
             {
                 $Arguments += " `"$AdminAccount`""
@@ -814,9 +841,8 @@ function Test-TargetResource
         [System.String]
         $SourceFolder = "Source",
 
-        [parameter(Mandatory = $true)]
         [System.Management.Automation.PSCredential]
-        $SetupCredential,
+        $SetupCredential = $null,
 
         [System.Management.Automation.PSCredential]
         $SourceCredential,
@@ -939,13 +965,10 @@ function Test-TargetResource
     Write-Verbose "Features found: '$($SQLData.Features)'"
 
     $result = $true
+    $splitSQLData = $SQLData.Features.Split(",");
     foreach($Feature in $Features.Split(","))
     {
-        # given that all the returned features are uppercase, make sure that the feature to search for
-        # is also uppercase
-        $Feature = $Feature.ToUpperInvariant();
-
-        if(!($SQLData.Features.Contains($Feature)))
+        if(!($splitSQLData -contains $Feature))
         {
             Write-Verbose "Unable to find feature '$Feature' in '$($SQLData.Features)'"
             $result = $false
